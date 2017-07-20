@@ -107,6 +107,7 @@ func releaseNewVersion(ctx context.Context, resChan chan ResOutput, repo, versio
 		log.Printf("branch (%s) is going to be created\n", releaseBranchName)
 		log.Printf("PR to branch (%s) from head (%s) is going to be created\n", cfg.BranchReleaseTo, releaseBranchName)
 		resChan <- ResOutput{NewVersion: releaseBranchName}
+		return
 	}
 
 	_, err = release.CreateBranch(ctx, cfg.OrganizationName, repo, releaseBranchName, fromBranch.Commit.SHA)
