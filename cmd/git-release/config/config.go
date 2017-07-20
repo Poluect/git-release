@@ -2,6 +2,8 @@ package config
 
 import (
 	"os"
+	"strconv"
+	"time"
 )
 
 // Config represents release configuration.
@@ -9,6 +11,7 @@ type Config struct {
 	GithubToken                        string
 	OrganizationName                   string
 	BranchReleaseFrom, BranchReleaseTo string
+	Timeout                            time.Duration
 }
 
 var cfg *Config
@@ -16,7 +19,7 @@ var cfg *Config
 func init() {
 	token := os.Getenv("GITHUB_TOKEN")
 	if token == "" {
-		token = "c96e9c79feb6970dad7c2743318a4a4bdb16cc9f"
+		panic("GITHUB token required.")
 	}
 	org := os.Getenv("ORGANIZATION_NAME")
 	if org == "" {
@@ -30,12 +33,17 @@ func init() {
 	if releaseTo == "" {
 		releaseTo = "master"
 	}
+	timeoutSeconds, err := strconv.Atoi(os.Getenv("TIMEOUT_SECONDS"))
+	if err != nil || timeoutSeconds < 0 {
+		timeoutSeconds = 60
+	}
 
 	cfg = &Config{
 		GithubToken:       token,
 		OrganizationName:  org,
 		BranchReleaseFrom: releaseFrom,
 		BranchReleaseTo:   releaseTo,
+		Timeout:           time.Duration(timeoutSeconds) * time.Second,
 	}
 }
 

@@ -48,8 +48,15 @@ func main() {
 		log.Fatal("repository name cannot be empty")
 	}
 
+	ctx := context.Background()
+	if cfg.Timeout != 0 {
+		var cancel func()
+		ctx, cancel = context.WithTimeout(ctx, cfg.Timeout)
+		defer cancel()
+	}
+
 	resChan := make(chan ResOutput)
-	go releaseNewVersion(context.Background(), resChan, *repoFlag, v, *dryFlag)
+	go releaseNewVersion(ctx, resChan, *repoFlag, v, *dryFlag)
 	out := <-resChan
 	if out.Err != nil {
 		log.Fatalf("release failed: %v\n", out.Err)
