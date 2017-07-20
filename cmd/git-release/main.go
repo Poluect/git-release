@@ -22,6 +22,7 @@ var cfg = config.GetConfig()
 func main() {
 	versionFlag := flag.String("version", "", "semantic version of new release. May be one of patch,minor,major, or specific version e.g. 1.3.5")
 	repoFlag := flag.String("repo", "", "repository name to build new release")
+	dryFlag := flag.Bool("dry", false, "specify --dry=true if you want to see what semantic version is going to be released")
 	flag.Parse()
 
 	var (
@@ -41,23 +42,25 @@ func main() {
 		valid = true
 	}
 	if !valid {
-		log.Fatalf("cannot parse version param %s. Should be one of patch,minor,major, or specific version e.g. 1.3.5", v)
+		log.Fatalf("cannot parse version param (%s). Should be one of patch,minor,major, or specific version e.g. 1.3.5", v)
 	}
 	if *repoFlag == "" {
 		log.Fatal("repository name cannot be empty")
 	}
 
 	resChan := make(chan ResOutput)
-	go releaseNewVersion(context.Background(), resChan, *repoFlag, v)
+	go releaseNewVersion(context.Background(), resChan, *repoFlag, v, *dryFlag)
 	out := <-resChan
 	if out.Err != nil {
 		log.Fatalf("release failed: %v\n", out.Err)
 	}
 
-	log.Printf("new release version: %s\n", out.NewVersion)
+	if !*dryFlag {
+		log.Printf("new release version: %s\n", out.NewVersion)
+	}
 }
 
-func releaseNewVersion(ctx context.Context, resChan chan ResOutput, repo, version string) {
+func releaseNewVersion(ctx context.Context, resChan chan ResOutput, repo, version string, dry bool) {
 	release.InitGithubClient(ctx, cfg.GithubToken)
 
 	log.Printf("specified release version: %s\n", version)
@@ -65,6 +68,16 @@ func releaseNewVersion(ctx context.Context, resChan chan ResOutput, repo, versio
 	_, err := release.GetRepoInfo(ctx, cfg.OrganizationName, repo)
 	if err != nil {
 		resChan <- ResOutput{Err: fmt.Errorf("fail get repo (%s): %v", repo, err)}
+		return
+	}
+	fromBranch, err := release.GetBranch(ctx, cfg.OrganizationName, repo, cfg.BranchReleaseFrom)
+	if err != nil {
+		resChan <- ResOutput{Err: fmt.Errorf("fail get branch (%s): %v", cfg.BranchReleaseFrom, err)}
+		return
+	}
+	_, err = release.GetBranch(ctx, cfg.OrganizationName, repo, cfg.BranchReleaseTo)
+	if err != nil {
+		resChan <- ResOutput{Err: fmt.Errorf("fail get branch (%s): %v", cfg.BranchReleaseTo, err)}
 		return
 	}
 
@@ -82,5 +95,27 @@ func releaseNewVersion(ctx context.Context, resChan chan ResOutput, repo, versio
 	}
 	log.Printf("new version is: %s\n", newVersion)
 
-	resChan <- ResOutput{NewVersion: newVersion}
+	releaseBranchName := fmt.Sprintf("release-v%s", newVersion)
+	if dry { // just describe what is going to be changed
+		log.Printf("branch (%s) is going to be created\n", releaseBranchName)
+		log.Printf("PR to branch (%s) from head (%s) is going to be created\n", cfg.BranchReleaseTo, releaseBranchName)
+		resChan <- ResOutput{NewVersion: releaseBranchName}
+	}
+
+	_, err = release.CreateBranch(ctx, cfg.OrganizationName, repo, releaseBranchName, fromBranch.Commit.SHA)
+	if err != nil {
+		resChan <- ResOutput{Err: fmt.Errorf("fail create new version: %v", err)}
+		return
+	}
+	log.Printf("branch (%s) has been created\n", releaseBranchName)
+
+	prTitle := fmt.Sprintf("Release v%s", newVersion)
+	pr, err := release.CreatePR(ctx, cfg.OrganizationName, repo, releaseBranchName, cfg.BranchReleaseTo, prTitle)
+	if err != nil {
+		resChan <- ResOutput{Err: fmt.Errorf("fail create pull request: (%v), please create it manually", err)}
+		return
+	}
+	log.Printf("new PR has been created with a state (%s)\n", *pr.State)
+
+	resChan <- ResOutput{NewVersion: releaseBranchName}
 }
